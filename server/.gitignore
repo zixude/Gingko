@@ -1,5 +1,0 @@
-config.js
-node_modules/
-.idea
-*.sqlite*
-dist/

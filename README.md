@@ -1,72 +1,45 @@
-![](./client/docs/images/screenshot-alien-screenplay.png)
+# Gingko Lite
 
-# Gingko Writer [![Web Deploy](https://github.com/gingko/client/actions/workflows/web-deploy.yml/badge.svg)](https://github.com/gingko/client/actions/workflows/web-deploy.yml)
+一个极小、本地优先的银杏式树形卡片画布。它从 Gingko Writer 的核心结构语义重新实现，只保留：
 
-Writing software to help organize and draft complex documents. Anything from novels and screenplays to legal briefs and graduate theses.
+- 完整树按层级横向展开、同级卡片纵向排列；
+- 点击卡片后，活动卡、祖先链与最近访问的后代在各自列中自动对齐；
+- 非当前路径退暗，后代区域通过动态圆角连续连接；
+- 各列独立纵向滚动，当前深度驱动横向镜头；
+- 新建、编辑、删除、拖拽移动卡片；
+- 新建空项目；
+- 打开和保存单个、可读的 `.gingko.json` 项目文件；
+- 仅监听本机的零依赖 Node.js Web 服务。
 
-This is a ground-up rewrite of [GingkoApp.com](https://gingkoapp.com). The latest version is available online at [gingkowriter.com](https://gingkowriter.com).
+没有账户、云同步、数据库、协作、支付、Electron 或遥测。
 
-This repo contains both halves of the web app:
+## 运行
 
-- `client/` — Elm + JS frontend (bundled with webpack, watched with elm-watch)
-- `server/` — TypeScript/Express backend
-- `data/` — local database files (created on first run, gitignored)
+需要 Node.js 20 或更高版本。
 
-## Contributions Welcome!
-
-To help **translate Gingko Writer**, join [the translation project](https://poeditor.com/join/project/k8Br3k0JVz).
-
-For code contributions, see [client/CONTRIBUTING.md](./client/CONTRIBUTING.md).
-
----
-
-## Installation & Dev Environment
-
-### 1. Prerequisites
-
-- [Node.js](https://nodejs.org)
-- [Bun](https://bun.sh)
-- [SQLite](https://sqlite.org)
-- [Redis](https://redis.io) — for server-side sessions
-- [CouchDB](https://couchdb.apache.org) — note your admin username and password for step 3 *
-
-\* _This dependency will be removed once all user documents are migrated to SQLite._
-
-Installation of these varies by system, so it's not covered here.
-
-### 2. Clone
-
-```
-git clone git@github.com:gingko/client.git gingko
-cd gingko
-```
-
-### 3. Server
-
-```
-cd server
-npm i
-cp config-example.js config.js
-sed -i 's/couchusername/your_couchdb_admin_username/' config.js
-sed -i 's/couchpassword/your_couchdb_admin_password/' config.js
-npm run build
+```bash
 npm start
 ```
 
-### 4. Client
+浏览器访问 <http://127.0.0.1:3000>。
 
-In a new terminal:
+## 使用
 
+- **新建**：清空为一个空项目；
+- **打开**：从浏览器选择 `.gingko.json`；
+- **保存文件**：通过浏览器下载完整项目文件；
+- 单击卡片切换活动路径，双击或点击铅笔进入编辑；
+- 活动卡四周按钮可新建同级、子级、编辑或删除；
+- 悬停卡片左缘后拖动手柄；上方落点表示同级插入，右侧落点表示放入子级，组内末卡下方落点表示追加同级。
+
+项目文件不引用外部资源，使用普通 JSON，可直接备份、复制或版本管理。
+
+## 测试
+
+```bash
+npm test
 ```
-cd client
-bun i
-cp config-example.js config.js
-bun run newwatch
-```
 
-Now visit http://localhost:3000 to use your local Gingko Writer install.
+## 来源与许可
 
-## Tests
-
-- Client end-to-end (Playwright): `cd client && bun run test`
-- Server unit tests (Jest): `cd server && npm test`
+树模型、操作语义与列投影视图参考了 [Gingko Writer](https://github.com/gingko/client)。本项目保留其 MIT 许可证，见 [`LICENSE`](./LICENSE)。

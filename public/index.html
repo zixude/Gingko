@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Gingko Lite</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <details id="project-menu" class="project-menu">
+      <summary aria-label="项目菜单" title="项目菜单">···</summary>
+      <div class="menu-panel">
+        <label for="project-title">项目名称</label>
+        <input id="project-title" class="project-title" value="Untitled" maxlength="120">
+        <nav class="file-actions" aria-label="项目文件">
+          <button id="new-project" type="button">新建空项目</button>
+          <button id="open-project" type="button">打开文件</button>
+          <button id="save-project" type="button" class="primary">保存文件</button>
+          <input id="file-input" type="file" accept=".json,.gingko.json,application/json" hidden>
+        </nav>
+        <div id="status" class="status" role="status">空项目</div>
+      </div>
+    </details>
+
+    <nav id="breadcrumbs" class="breadcrumbs" aria-label="当前路径"></nav>
+    <main id="canvas" class="canvas" aria-label="树形卡片画布"></main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

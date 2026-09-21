@@ -1,0 +1,377 @@
+:root {
+  --bg-main: #227ca9;
+  --bg-left: #227ca9;
+  --tree-bg-dim: rgb(110 179 210 / 52%);
+  --tree-bg-dim-hover: rgb(144 201 224 / 68%);
+  --tree-bg-path: #b9dce8;
+  --tree-bg-path-hover: #cce7ef;
+  --active-bg: #fffefa;
+  --ink: #29313a;
+  --muted-ink: rgb(35 60 72 / 68%);
+  --selection: #91bf3f;
+  --line: rgb(22 67 88 / 20%);
+  --shadow: 1px 2px 7px rgb(9 43 60 / 28%);
+  font-family: Georgia, "Times New Roman", serif;
+  color: var(--ink);
+  background: var(--bg-main);
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; }
+body { margin: 0; overflow: hidden; background: var(--bg-main); }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+
+/* Project commands stay outside the document surface. */
+.project-menu {
+  position: fixed;
+  top: 12px;
+  right: 14px;
+  z-index: 100;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.project-menu summary {
+  width: 38px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 7px;
+  color: rgb(255 255 255 / 78%);
+  background: rgb(18 78 105 / 60%);
+  box-shadow: 0 5px 18px rgb(4 34 49 / 18%);
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  list-style: none;
+  backdrop-filter: blur(12px);
+}
+.project-menu summary::-webkit-details-marker { display: none; }
+.project-menu summary:hover { color: white; background: rgb(18 78 105 / 82%); }
+.menu-panel {
+  position: absolute;
+  top: 41px;
+  right: 0;
+  width: 220px;
+  padding: 12px;
+  border: 1px solid rgb(255 255 255 / 55%);
+  border-radius: 9px;
+  background: rgb(255 254 250 / 97%);
+  box-shadow: 0 14px 40px rgb(3 30 43 / 28%);
+  color: var(--ink);
+}
+.menu-panel label {
+  display: block;
+  margin: 0 0 5px 2px;
+  color: #70777b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+.project-title {
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid #d8d7d1;
+  border-radius: 6px;
+  background: white;
+  font-weight: 600;
+}
+.file-actions { display: grid; gap: 6px; margin-top: 10px; }
+.file-actions button {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #d8d7d1;
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  text-align: left;
+}
+.file-actions button:hover { border-color: #999; }
+.file-actions button.primary { color: white; border-color: #47794b; background: #47794b; }
+.status {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #ddd;
+  color: #70777b;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Path navigation is part of the spatial interaction, not a command bar. */
+.breadcrumbs {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  z-index: 90;
+  display: flex;
+  max-width: calc(100vw - 80px);
+  overflow: hidden;
+  border-radius: 3px 12px 12px 3px;
+  box-shadow: 0 2px 8px rgb(6 43 60 / 22%);
+  opacity: .82;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.breadcrumbs:hover { opacity: 1; }
+.breadcrumbs button {
+  position: relative;
+  min-width: 38px;
+  max-width: 190px;
+  height: 25px;
+  margin: 0 1px 0 0;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 0;
+  color: #284150;
+  background: rgb(237 246 248 / 90%);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.breadcrumbs button:hover { background: var(--active-bg); }
+
+/* The document is a horizontal camera over independently scrolling columns. */
+.canvas {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(60px, .30fr) 1fr minmax(60px, .30fr);
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg-main);
+  scrollbar-color: rgb(9 65 92 / 45%) transparent;
+  scrollbar-width: thin;
+}
+#column-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(50ch, 100vw), 80ch));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(min(50ch, 100vw), 80ch);
+}
+.column {
+  width: 100%;
+  height: 100vh;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-width: none;
+  outline: none;
+}
+.column::-webkit-scrollbar { width: 0; }
+.left-padding-column { margin-right: 38px; background: var(--bg-left); }
+.right-padding-column { background: var(--bg-main); }
+.buffer { height: 50vh; margin: 0 16px; }
+
+/* Every group is one parent's ordered children. */
+.group {
+  position: relative;
+  z-index: 5;
+  margin: 0;
+  margin-right: -1px;
+  padding: 10px;
+  border-radius: 3px;
+  color: var(--muted-ink);
+  background: var(--tree-bg-dim);
+  box-shadow: var(--shadow);
+}
+.group:empty { height: 0; padding: 0; border: 0; }
+.group.has-active {
+  color: var(--ink);
+  background: var(--tree-bg-path);
+}
+.group.active-descendant {
+  z-index: 9;
+  color: var(--ink);
+  background: var(--active-bg);
+  border-radius: 0;
+}
+
+.card {
+  position: relative;
+  margin: 0 0 2px;
+  border-left: 4px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+}
+.card:last-of-type { margin-bottom: 0; }
+.card:hover { background: var(--tree-bg-dim-hover); }
+.group.has-active .card { background: var(--tree-bg-path); }
+.group.has-active .card:hover { background: var(--tree-bg-path-hover); }
+.group.active-descendant .card,
+.group.active-descendant .card:hover { background: var(--active-bg); }
+.card .view {
+  min-height: 58px;
+  padding: 17px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  line-height: 1.42;
+}
+.group.has-active .card.active {
+  border-left-color: var(--selection);
+  color: var(--ink);
+  background: var(--active-bg);
+  box-shadow: 0 1px 4px rgb(28 43 49 / 48%);
+}
+.card.active.has-children:not(.editing) {
+  margin-right: -9px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.card.ancestor {
+  padding-left: 4px;
+  border-left: 0;
+  color: var(--ink);
+  background: var(--tree-bg-path);
+}
+.card.ancestor::before,
+.card.ancestor::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 12px;
+  height: 100%;
+  background: var(--tree-bg-path);
+}
+.card.ancestor::before { left: -10px; }
+.card.ancestor::after { right: -10px; }
+.column:first-child .card.ancestor::before { display: none; }
+.card.dragging { opacity: .32; }
+
+/* Editing remains a state of the active card, not the default card surface. */
+.card.editing {
+  display: grid;
+  padding: 15px 0 6px 4px;
+  border: 1px solid rgb(70 85 89 / 40%);
+  border-left: 4px solid var(--selection);
+  background: var(--active-bg);
+  box-shadow: 1px 2px 5px rgb(10 37 48 / 42%);
+}
+.card-editor {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-height: 72px;
+  padding: 5px 38px 5px 15px;
+  resize: none;
+  overflow: hidden;
+  border: 0;
+  outline: 0;
+  color: #202a2f;
+  background: transparent;
+  font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.edit-save {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  z-index: 15;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #47794b;
+  background: rgb(255 255 255 / 72%);
+  font-weight: 800;
+}
+
+/* Original active-card insertion geometry. */
+.active-controls button {
+  position: absolute;
+  z-index: 16;
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgb(70 85 89 / 20%);
+  color: #677278;
+  background: var(--active-bg);
+  opacity: .28;
+}
+.card.active:hover .active-controls button { opacity: .82; }
+.active-controls button:hover { color: #27343b; opacity: 1 !important; }
+.insert-above { top: -11px; left: calc(50% - 20px); width: 40px !important; border-radius: 10px 10px 0 0; }
+.insert-below { bottom: -11px; left: calc(50% - 20px); width: 40px !important; border-radius: 0 0 10px 10px; }
+.insert-child { right: -10px; top: calc(50% - 13px); border-radius: 0 10px 10px 0; }
+.delete-card { top: 1px; right: 1px; }
+.edit-card { right: 1px; bottom: 1px; }
+
+.drag-region {
+  visibility: hidden;
+  position: absolute;
+  z-index: 18;
+  left: -7px;
+  top: 0;
+  width: 20px;
+  height: 100%;
+  padding: 4px 6px 4px 8px;
+  cursor: move;
+}
+.handle {
+  width: 100%;
+  height: 100%;
+  background-size: 2px 4px;
+  background-image: linear-gradient(0deg, rgb(50 61 66 / 30%) 20%, transparent 50%);
+}
+.card:hover .drag-region { visibility: visible; }
+.card.editing .drag-region { display: none; }
+
+/* Above and into are available on every card; below only on the last sibling. */
+.drop-region {
+  position: absolute;
+  z-index: 30;
+  display: none;
+  pointer-events: none;
+}
+.dragging-tree .drop-region { display: block; pointer-events: auto; }
+.drop-region-above,
+.drop-region-below { left: 0; width: 100%; height: 30px; }
+.drop-region-above { top: -15px; }
+.drop-region-below { bottom: -15px; }
+.drop-region-into { top: 0; right: 0; width: 25%; height: 100%; }
+.drop-region-above.drop-hover,
+.drop-region-below.drop-hover {
+  background: linear-gradient(to bottom, transparent 0, rgb(145 191 63 / 18%) 35%, rgb(145 191 63 / 95%) 46%, rgb(145 191 63 / 95%) 54%, transparent 100%);
+}
+.drop-region-into.drop-hover {
+  background: linear-gradient(to right, transparent, rgb(145 191 63 / 85%));
+}
+
+/* Dynamic rounded connectors bridge active regions after every scroll. */
+.fillet {
+  display: none;
+  position: absolute;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  fill: var(--active-bg);
+  transform-origin: center;
+}
+.fillet.flipped { fill: var(--bg-main); }
+.card.active .fillet.flipped { fill: var(--tree-bg-path); }
+.fillet.top-right { top: -16px; right: 1px; }
+.card.active .fillet.top-right,
+.card.active .fillet.bottom-right { right: 0; }
+.fillet.top-right.flipped { top: 0; transform: scaleY(-1); }
+.fillet.bottom-right { bottom: -16px; right: 1px; transform: scaleY(-1); }
+.fillet.bottom-right.flipped { bottom: 0; transform: none; }
+.fillet.top-left { top: -16px; left: 0; transform: scaleX(-1); }
+.fillet.top-left.flipped { top: 0; transform: scale(-1, -1); }
+.fillet.bottom-left { bottom: -16px; left: 0; transform: scale(-1, -1); }
+.fillet.bottom-left.flipped { bottom: 0; transform: scale(-1, 1); }
+
+@media (max-width: 760px) {
+  .project-menu { top: 8px; right: 8px; }
+  .breadcrumbs { top: 8px; left: 8px; max-width: calc(100vw - 60px); }
+  .canvas { grid-template-columns: 18px 1fr 18px; }
+  #column-container {
+    grid-template-columns: repeat(auto-fill, minmax(88vw, 88vw));
+    grid-auto-columns: minmax(88vw, 88vw);
+  }
+  .left-padding-column { margin-right: 10px; }
+}
