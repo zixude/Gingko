@@ -1,7 +1,5 @@
 import {
   ROOT_ID,
-  TreeError,
-  applyOperation,
   findNode,
   getAncestors,
   getDepth,
@@ -10,12 +8,8 @@ import {
   locateNode,
   projectColumns,
 } from "/src/tree.js";
-import {
-  createProject,
-  parseProject,
-  projectFileName,
-  serializeProject,
-} from "/src/project.js";
+import { parseProject, projectFileName, serializeProject } from "/src/project.js";
+import { RuntimeClient } from "/runtime-client.js";
 
 const elements = {
   canvas: document.querySelector("#canvas"),
@@ -29,41 +23,54 @@ const elements = {
   menu: document.querySelector("#project-menu"),
 };
 
-const initialProject = createProject();
+const runtime = new RuntimeClient();
+const initialSnapshot = await runtime.load();
+const initialProject = initialSnapshot.project;
+const initialActiveId = initialSnapshot.focusedNodeId ?? initialProject.root.children[0].id;
 const state = {
   project: initialProject,
-  activeId: initialProject.root.children[0].id,
+  revision: initialSnapshot.revision,
+  instanceId: initialSnapshot.instanceId,
+  activeId: initialActiveId,
   activePast: [],
-  mode: "editing",
+  mode: findNode(initialProject.root, initialActiveId)?.content ? "normal" : "editing",
+  editingDraft: findNode(initialProject.root, initialActiveId)?.content ?? "",
+  editingBaseContent: findNode(initialProject.root, initialActiveId)?.content ?? "",
   draggedId: null,
   dirty: false,
   fileName: null,
 };
 
 let filletFrame = null;
+let draftCommitTimer = null;
 
 bindProjectActions();
+runtime.subscribe(handleRuntimeEvent, () => setStatus("与本地 Runtime 的事件连接已断开"));
 render({ preserveScroll: false });
 requestAnimationFrame(() => {
   positionActive(true);
-  focusEditor();
+  if (state.mode === "editing") focusEditor();
 });
 
 function bindProjectActions() {
-  elements.newProject.addEventListener("click", () => {
+  elements.newProject.addEventListener("click", async () => {
     if (!mayDiscardChanges()) return;
-    state.project = createProject();
-    state.activeId = state.project.root.children[0].id;
-    state.activePast = [];
-    state.mode = "editing";
-    state.fileName = null;
-    state.dirty = false;
-    closeMenu();
-    render({ preserveScroll: false });
-    requestAnimationFrame(() => {
-      positionActive(true);
-      focusEditor();
-    });
+    try {
+      const snapshot = await runtime.newProject("Untitled", state.revision);
+      adoptSnapshot(snapshot, { dirty: false, preserveScroll: false });
+      state.activePast = [];
+      state.mode = "editing";
+      setEditingDraft("");
+      state.fileName = null;
+      closeMenu();
+      render({ preserveScroll: false });
+      requestAnimationFrame(() => {
+        positionActive(true);
+        focusEditor();
+      });
+    } catch (error) {
+      showRuntimeError("无法新建项目", error);
+    }
   });
 
   elements.openProject.addEventListener("click", () => {
@@ -77,12 +84,15 @@ function bindProjectActions() {
     elements.fileInput.value = "";
     if (!file) return;
     try {
-      state.project = ensureProjectHasCard(parseProject(await file.text()));
-      state.activeId = state.project.root.children[0].id;
+      const project = parseProject(await file.text());
+      const snapshot = await runtime.replaceProject(project, state.revision);
+      adoptSnapshot(snapshot, { dirty: false, preserveScroll: false });
+      state.activeId = snapshot.focusedNodeId ?? state.project.root.children[0].id;
       state.activePast = [];
-      state.mode = findNode(state.project.root, state.activeId).content ? "normal" : "editing";
+      const content = findNode(state.project.root, state.activeId).content;
+      state.mode = content ? "normal" : "editing";
+      setEditingDraft(content);
       state.fileName = file.name;
-      state.dirty = false;
       render({ preserveScroll: false });
       requestAnimationFrame(() => {
         positionActive(true);
@@ -94,18 +104,24 @@ function bindProjectActions() {
     }
   });
 
-  elements.saveProject.addEventListener("click", () => {
+  elements.saveProject.addEventListener("click", async () => {
+    if (state.mode === "editing" && !(await commitEditingDraft())) return;
     saveProjectFile();
     closeMenu();
   });
 
-  elements.title.addEventListener("input", () => {
-    state.project = { ...state.project, title: elements.title.value };
-    markDirty();
+  elements.title.addEventListener("change", async () => {
+    try {
+      const snapshot = await runtime.setTitle(elements.title.value, state.revision);
+      adoptSnapshot(snapshot, { dirty: true });
+    } catch (error) {
+      elements.title.value = state.project.title;
+      showRuntimeError("无法重命名项目", error);
+    }
   });
 
   window.addEventListener("beforeunload", (event) => {
-    if (!state.dirty) return;
+    if (!hasUnsavedChanges()) return;
     event.preventDefault();
     event.returnValue = "";
   });
@@ -245,16 +261,15 @@ function createCard(node, isLast, ancestorIds) {
 function createEditor(node) {
   const textarea = document.createElement("textarea");
   textarea.className = "card-editor";
-  textarea.value = node.content;
+  textarea.value = state.editingDraft;
   textarea.placeholder = "写下内容…";
   textarea.setAttribute("aria-label", "卡片内容");
   textarea.addEventListener("input", () => {
-    state.project = {
-      ...state.project,
-      root: applyOperation(state.project.root, { type: "update", id: node.id, content: textarea.value }),
-    };
+    state.editingDraft = textarea.value;
     autoSize(textarea);
-    markDirty();
+    setStatus("编辑草稿尚未提交");
+    clearTimeout(draftCommitTimer);
+    draftCommitTimer = window.setTimeout(() => commitEditingDraft({ silent: true }), 700);
     scheduleFilletUpdate();
   });
   textarea.addEventListener("keydown", (event) => {
@@ -349,25 +364,31 @@ function cardTitle(content) {
   return firstLine.replace(/^#{1,6}\s*/, "").replace(/[*_`]/g, "").slice(0, 42);
 }
 
-function activateCard(id, { instant = false, mode = "normal" } = {}) {
+async function activateCard(id, { instant = false, mode = "normal", broadcast = true, skipCommit = false } = {}) {
   if (!findNode(state.project.root, id)) return;
+  if (!skipCommit && state.mode === "editing" && (id !== state.activeId || mode !== "editing")) {
+    if (!(await commitEditingDraft())) return;
+  }
   if (id !== state.activeId) {
     state.activePast = [state.activeId, ...state.activePast.filter((pastId) => pastId !== state.activeId)].slice(0, 40);
   }
   state.activeId = id;
   state.mode = mode;
+  if (mode === "editing") setEditingDraft(findNode(state.project.root, id).content);
   render({ preserveScroll: true });
   requestAnimationFrame(() => {
     positionActive(instant);
     if (mode === "editing") focusEditor();
   });
+  if (broadcast) runtime.focusNode(id).catch((error) => showRuntimeError("无法同步画布焦点", error));
 }
 
 function enterEditing(id) {
   activateCard(id, { instant: true, mode: "editing" });
 }
 
-function closeEditing() {
+async function closeEditing() {
+  if (!(await commitEditingDraft())) return;
   state.mode = "normal";
   render({ preserveScroll: true });
   requestAnimationFrame(() => positionActive(true));
@@ -401,20 +422,10 @@ function deleteCard(id) {
 
   if (location.parent.id === ROOT_ID && state.project.root.children.length === 1) {
     const blankId = crypto.randomUUID();
-    const withoutLastCard = applyOperation(state.project.root, { type: "remove", id });
-    state.project = {
-      ...state.project,
-      root: applyOperation(withoutLastCard, { type: "insert", id: blankId, content: "", parentId: ROOT_ID, index: 0 }),
-    };
-    state.activeId = blankId;
-    state.activePast = [];
-    state.mode = "editing";
-    markDirty();
-    render({ preserveScroll: false });
-    requestAnimationFrame(() => {
-      positionActive(true);
-      focusEditor();
-    });
+    runOperations([
+      { type: "remove", id },
+      { type: "insert", id: blankId, content: "", parentId: ROOT_ID, index: 0 },
+    ], blankId, "editing");
     return;
   }
 
@@ -425,13 +436,17 @@ function deleteCard(id) {
 }
 
 function runOperation(operation, activeId = state.activeId, mode = "normal") {
+  return runOperations([operation], activeId, mode);
+}
+
+async function runOperations(operations, activeId = state.activeId, mode = "normal") {
   try {
-    state.project = { ...state.project, root: applyOperation(state.project.root, operation) };
-    markDirty();
-    activateCard(activeId, { mode });
+    if (state.mode === "editing" && !(await commitEditingDraft())) return;
+    const snapshot = await runtime.applyOperations(operations, state.revision);
+    adoptSnapshot(snapshot, { dirty: true });
+    await activateCard(activeId, { mode, skipCommit: true });
   } catch (error) {
-    const message = error instanceof TreeError ? error.message : "Unexpected tree operation failure";
-    window.alert(`无法完成操作：${message}`);
+    showRuntimeError("无法完成树操作", error);
   }
 }
 
@@ -627,17 +642,115 @@ function setStatus(message) {
   elements.status.textContent = message;
 }
 
-function mayDiscardChanges() {
-  return !state.dirty || window.confirm("当前项目尚未保存，确定放弃更改？");
+function hasUnsavedChanges() {
+  return state.dirty || (state.mode === "editing" && state.editingDraft !== state.editingBaseContent);
 }
 
-function ensureProjectHasCard(project) {
-  if (project.root.children.length > 0) return project;
-  const id = crypto.randomUUID();
-  return {
-    ...project,
-    root: applyOperation(project.root, { type: "insert", id, content: "", parentId: ROOT_ID, index: 0 }),
-  };
+function mayDiscardChanges() {
+  return !hasUnsavedChanges() || window.confirm("当前项目尚未保存，确定放弃更改？");
+}
+
+function setEditingDraft(content) {
+  state.editingDraft = content;
+  state.editingBaseContent = content;
+}
+
+async function commitEditingDraft({ silent = false } = {}) {
+  clearTimeout(draftCommitTimer);
+  draftCommitTimer = null;
+  if (state.mode !== "editing" || state.editingDraft === state.editingBaseContent) return true;
+  const current = findNode(state.project.root, state.activeId);
+  if (!current) {
+    window.alert("当前编辑的卡片已被其他操作删除，草稿未提交。");
+    return false;
+  }
+  if (current.content !== state.editingBaseContent) {
+    if (silent) {
+      setStatus("Agent 已修改当前卡片；自动提交暂停");
+      return false;
+    }
+    const overwrite = window.confirm("Agent 或其他画布已修改这张卡片。是否用当前草稿覆盖该修改？");
+    if (!overwrite) {
+      setEditingDraft(current.content);
+      render({ preserveScroll: true });
+      focusEditor();
+      return false;
+    }
+  }
+  try {
+    const snapshot = await runtime.applyOperations([
+      { type: "update", id: state.activeId, content: state.editingDraft },
+    ], state.revision);
+    adoptSnapshot(snapshot, { dirty: true });
+    state.editingBaseContent = state.editingDraft;
+    return true;
+  } catch (error) {
+    showRuntimeError("无法提交编辑", error);
+    return false;
+  }
+}
+
+function adoptSnapshot(snapshot, { dirty = state.dirty } = {}) {
+  state.project = snapshot.project;
+  state.revision = snapshot.revision;
+  state.instanceId = snapshot.instanceId;
+  state.dirty = dirty;
+  if (dirty) setStatus("未保存");
+  if (!findNode(state.project.root, state.activeId)) {
+    state.activeId = snapshot.focusedNodeId ?? state.project.root.children[0]?.id ?? null;
+    state.mode = "normal";
+    const content = state.activeId ? findNode(state.project.root, state.activeId)?.content ?? "" : "";
+    setEditingDraft(content);
+  }
+}
+
+function handleRuntimeEvent(event) {
+  if (event.type === "snapshot") {
+    const runtimeRestarted = event.instanceId !== state.instanceId;
+    if (!runtimeRestarted && event.revision <= state.revision) return;
+    if (runtimeRestarted && hasUnsavedChanges() && !window.confirm("本地 Runtime 已重启，内存项目已重置。确定载入新项目？取消后可先保存当前浏览器中的项目。")) {
+      setStatus("Runtime 已重启；请先保存当前项目，再刷新页面");
+      return;
+    }
+    adoptSnapshot(event, { dirty: runtimeRestarted ? false : state.dirty });
+    render({ preserveScroll: true });
+    return;
+  }
+  if (event.type === "project.changed") {
+    const sameInstance = event.instanceId === state.instanceId;
+    if (sameInstance && (event.sourceId === runtime.clientId || event.revision <= state.revision)) return;
+    const wasEditing = state.mode === "editing";
+    const editedId = state.activeId;
+    const baseContent = state.editingBaseContent;
+    const draft = state.editingDraft;
+    const editedNodeSurvives = Boolean(findNode(event.project.root, editedId));
+    adoptSnapshot(event, { dirty: true });
+    render({ preserveScroll: true });
+    requestAnimationFrame(() => positionActive(true));
+    if (wasEditing && !editedNodeSurvives) {
+      window.alert(`Agent 或其他画布删除了正在编辑的卡片。未提交草稿：\n\n${draft}`);
+    } else if (wasEditing && findNode(state.project.root, editedId)?.content !== baseContent) {
+      setStatus("Agent 已修改当前卡片；你的编辑草稿仍保留");
+      focusEditor();
+    }
+    return;
+  }
+  if (event.type === "view.focused" && event.sourceId !== runtime.clientId) {
+    activateCard(event.id, { broadcast: false });
+  }
+}
+
+async function showRuntimeError(prefix, error) {
+  if (error.code === "REVISION_CONFLICT") {
+    try {
+      const latest = await runtime.load();
+      adoptSnapshot(latest, { dirty: true });
+      render({ preserveScroll: true });
+    } catch {
+      // Preserve the original error below.
+    }
+  }
+  window.alert(`${prefix}：${error.message}`);
 }
 
 function closeMenu() {
